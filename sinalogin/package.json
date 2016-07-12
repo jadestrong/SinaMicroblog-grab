@@ -1,0 +1,16 @@
+{
+  "name": "sinalogin",
+  "version": "1.0.0",
+  "description": "sina login",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "sina",
+    "micro-blog",
+    "login"
+  ],
+  "author": "JadeStrong",
+  "license": "ISC"
+}

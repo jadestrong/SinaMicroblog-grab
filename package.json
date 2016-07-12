@@ -1,0 +1,28 @@
+{
+  "name": "sina-microblog-grab",
+  "version": "1.0.0",
+  "description": "A crawler for sina microblog data grab.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jadestrong/SinaMicroblog-grab.git"
+  },
+  "keywords": [
+    "crawler",
+    "sina",
+    "microblog"
+  ],
+  "author": "JadeStrong",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jadestrong/SinaMicroblog-grab/issues"
+  },
+  "homepage": "https://github.com/jadestrong/SinaMicroblog-grab#readme",
+  "dependencies": {
+    "async": "^2.0.0-rc.6",
+    "request": "^2.73.0"
+  }
+}
