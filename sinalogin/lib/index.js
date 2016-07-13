@@ -5,6 +5,7 @@ const fs = require('fs');
 const readline = require('readline');
 const querystring = require('querystring');
 const SinaRSA = require('../SinaRSA');
+const FileCookieStore = require('tough-cookie-filestore');
 
 var encrypt = {};//从新浪服务端取得对密码进行加密的公玥数据
 var loginStatus = 0;//0表示未登录状态
@@ -25,11 +26,16 @@ var SinaLogin = function (account,callback) {
 
 SinaLogin.prototype.login = function () {
     if (this.account.cookiefile && fs.existsSync(this.account.cookiefile)) {
-        let cookie = cookieLoad(this.account.cookiefile);
-        return testCookie();
+        let cookies = this.cookieLoad(this.account.cookiefile);
+        testCookie(cookies)
     } else {
         main();
     }
+}
+
+SinaLogin.prototype.cookieLoad = function () {
+    let data = fs.readFileSync(this.account.cookiefile,'utf-8');
+    return data;
 }
 
 function main() {
@@ -38,8 +44,7 @@ function main() {
         parseEncryptContent,
         solveVertifyCode,
         login,
-        loginJump,
-        testCookie
+        loginJump
     ],callbackFn);
 }
 
@@ -124,7 +129,6 @@ function inputPinCode(callback) {
  * @return {[type]}            [description]
  */
 function solveVertifyCode(callback) {
-    console.log("loginStatus =" + loginStatus);
     console.log(encrypt.content.showpin);
     if (loginStatus || encrypt.content.showpin == 1) {
         async.waterfall([
@@ -173,7 +177,7 @@ function login(code,callback) {
             eturntype: 'META',
             ssosimplelogin: '1'
         };
-        console.log(params);
+
         if (loginStatus || encrypt.content.showpin == 1) {
             params.door = code;
             params.pcid = encrypt.content.pcid;
@@ -181,7 +185,7 @@ function login(code,callback) {
 
         request.post({url:postUrl,form:params},(err,respones,body) => {
             loginInfo.content = body;
-            console.log(body);
+            // console.log(body);
             callback(err);
         });
 }
@@ -195,26 +199,14 @@ function loginJump (callback) {
     let reg = /location.replace\(["'](.*)["']\)/;
     let jumpUrl = reg.exec(loginInfo.content)[1];
     let obj = querystring.parse(jumpUrl);
-    //如果返回码为0.表示之前登录成功，可以直接去取cookie
     if (obj.retcode == 0) {
-        let jar = request.jar();
-        // accountInfo
-        request.get({url:obj.url,jar:jar},(err,res,body) => {
-            console.log(jar);
-            cookieSave(jar,accountInfo.cookiefile);
-            callback(null,jar);
+        let jar = request.jar(new FileCookieStore('cookies.json'));
+        request.defaults({jar:jar}).get(jumpUrl,function () {
+            // var cookies = jar.getCookies(jumpUrl);
+            cookieSave(accountInfo.cookiefile);
+            callback(null);
         });
-    }
-    // else {
-    //     if (obj.retcode === 4049) {
-    //         loginStatus = 1;
-    //         return main();
-    //     }
-    //
-    //     accountInfo.logined = false;
-    //     callbackFn(obj.retcode,accountInfo);
-    // }
-    else if (obj.retcode == 4049) { //异地登录，需要重新登录
+    } else if (obj.retcode == 4049) { //需要填入验证码
         loginStatus = 1;//难道不用输入验证码了吗
         // console.log("错误原因：" + obj.reason);
         return main();
@@ -222,34 +214,43 @@ function loginJump (callback) {
     callbackFn(obj);
 }
 
-function cookieSave(jar,cookiefile) {
-    let cookies = jar.cookies || [];
-    console.log(cookies);
-    let results = cookies.map(function (cookie,index,array) {
-        return cookie.str;
-    });
-    fs.writeFileSync(cookiefile,results.join('\n'));
-
+function cookieSave(cookiefile) {
+    if (fs.existsSync('./cookies.json')) {
+        fs.readFile('./cookies.json',(err,data) => {
+            if (err) throw err;
+            let cookieArray = [];
+            let cookies = JSON.parse(data);
+            cookies = cookies['weibo.com']['/'];
+            for (let prop in cookies) {
+                let cookie = cookies[prop];
+                cookieArray.push([cookie.key,cookie.value].join('='));
+            }
+            fs.writeFileSync(cookiefile,cookieArray.join(';'));
+        });
+    }
 }
 
-function testCookie(jar) {
-    let url = 'http://weibo.com/messages';
-    request({
-        url:url,
-        jar:jar
-    },(err,res,body) => {
+function testCookie(cookies) {
+    let options = {
+        url:'http://weibo.com/messages',
+        headers:{
+            cookies:cookies
+        }
+    };
+    let callback = function (err,response,body) {
         if (err) {
             return callbackFn(err);
         }
-        if (res.Status === 302) {
+        if (response.statusCode == 302) {
             console.log('Cookie Invalid!');
             return callbackFn(err);
         } else {
             console.log('Cookie Wonderful!')
             accountInfo.logined = true;
-            accountInfo.jar = jar;
             callbackFn(null,accountInfo);
         }
-    })
+    }
+    request(options,callback);
 }
+
 module.exports = SinaLogin;

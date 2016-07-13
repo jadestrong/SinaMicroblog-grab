@@ -6,6 +6,7 @@ let account = {
     cookiefile:'cookie.bat'
 };
 let sina = new SinaLogin(account,function (err) {
-    console.log(err);
+    if (err) {return console.log(err.meessage);}
 });
 sina.login();
+console.log(sina.cookieLoad());
