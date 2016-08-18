@@ -7,9 +7,12 @@ const querystring = require('querystring');
 const SinaRSA = require('../SinaRSA');
 const FileCookieStore = require('tough-cookie-filestore');
 
-var encrypt = {};//从新浪服务端取得对密码进行加密的公玥数据
-var loginStatus = 0;//0表示未登录状态
-var pincode = 'pincode.png';//这里先暂时固定位置，等后面再跳整
+// const superagent = require('superagent');
+const cheerio = require('cheerio');
+
+var encrypt = {}; //从新浪服务端取得对密码进行加密的公玥数据
+var loginStatus = 0; //0表示未登录状态
+var pincode = 'pincode.png'; //这里先暂时固定位置，等后面再跳整
 var loginInfo = {};
 
 var accountInfo = null;
@@ -17,14 +20,15 @@ var callbackFn = null;
 
 //这个构造函数还需要改进，加入对输入参数的判断？？
 //这里可以加一个options参数，包括（验证码图片的存放地址）
-var SinaLogin = function (account,callback) {
+var SinaLogin = function(account, callback) {
     this.account = account;
     // this.callback = callback;
     accountInfo = account;
     callbackFn = callback;
 }
 
-SinaLogin.prototype.login = function () {
+SinaLogin.prototype.login = function() {
+    console.log(fs.existsSync(this.account.cookiefile));
     if (this.account.cookiefile && fs.existsSync(this.account.cookiefile)) {
         let cookies = this.cookieLoad(this.account.cookiefile);
         testCookie(cookies)
@@ -33,19 +37,23 @@ SinaLogin.prototype.login = function () {
     }
 }
 
-SinaLogin.prototype.cookieLoad = function () {
-    let data = fs.readFileSync(this.account.cookiefile,'utf-8');
+SinaLogin.prototype.cookieLoad = function() {
+    let data = fs.readFileSync(this.account.cookiefile, 'utf-8');
     return data;
 }
 
 function main() {
+    console.log('fuck');
     async.waterfall([
         getMicroBlogRsa,
         parseEncryptContent,
-        solveVertifyCode,
+        getPinImage,
+        // inputPinCode,
+        // solveVertifyCode,
         login,
-        loginJump
-    ],callbackFn);
+        loginJump,
+        cookieSave
+    ], callbackFn);
 }
 
 /**
@@ -60,18 +68,20 @@ sinaSSOController.preloginCallBack({
     "showpin":0,"exectime":327})
 */
 function getMicroBlogRsa(callback) {
+    console.log('1');
     // letg username = accountInfo.username.replace(/@/g, '%40');
     let encodeUsername = sinaSSOEncoder.base64.encode(encodeURIComponent(accountInfo.username));
     let loginURL = 'http://login.sina.com.cn/sso/prelogin.php?entry=weibo&callback=sinaSSOController.preloginCallBack&su=' +
         encodeUsername +
         '&rsakt=mod&checkpin=1&client=ssologin.js(v1.4.11)&_=' +
         Date.now();
-    request(loginURL,(error, respones, body) => {
-        if (!error && respones.statusCode == 200) {
-            // console.log(body);
-            encrypt.content = body;
-        }
-        callback(error);
+    request(loginURL, (error, response, body) => {
+        // if (!error && respones.statusCode == 200) {
+        // console.log(body);
+        // encrypt.content = body;
+        // }
+        let err = !error && response.statusCode == 200 ? null : new Error('getMicroBlogRsa方法获取公共密钥失败.');
+        callback(err, body);
     });
 }
 /**
@@ -79,32 +89,46 @@ function getMicroBlogRsa(callback) {
  * @param  {Function} callback [Nodejs模式的回调，有错误时处理错误，无错误时传入null]
  * @return {[type]}            [无]
  */
-function parseEncryptContent(callback) {
+function parseEncryptContent(encryptContent, callback) {
+    console.log('2');
     let reg = /\{.*\}/;
     try {
-        let str = reg.exec(encrypt.content);
-        let obj = JSON.parse(str);
-        encrypt.content = obj;
+        let str = reg.exec(encryptContent);
+        encryptContent = JSON.parse(str);
     } catch (e) {
         return callback(e);
     }
-    callback(null);
+    callback(null, encryptContent);
 }
 /**
  * 当需要填验证码时，需要去该地址去获取验证码图片
  * @param  {Function} callback [description]
  * @return {[type]}            [description]
  */
-function getPinImage(callback) {
-    let url = 'http://login.sina.com.cn/cgi/pin.php' +
-        '?r=' + Math.floor(Math.random() * 1e8) +
-        '&s=' + 0 + '&p=' + encrypt.content.pcid;
-    try {
-        request(url).pipe(fs.createWriteStream(pincode));
-    } catch (e) {
-        return callback(e);
+function getPinImage(encryptContent, callback) {
+    console.log('3');
+    if (loginStatus || encryptContent.showpin == 1) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+        let url = 'http://login.sina.com.cn/cgi/pin.php' +
+            '?r=' + Math.floor(Math.random() * 1e8) +
+            '&s=' + 0 + '&p=' + encryptContent.pcid;
+        let stream = request(url)
+            .on('error', (err) => {
+                callback(err);
+            })
+            .pipe(fs.createWriteStream(pincode));
+        stream.on('finish', () => {
+            rl.question('请输入验证码： \n', function(input) {
+                console.log('你输入的验证码为：' + input);
+                rl.close();
+                return callback(null, input, encryptContent);
+            });
+        });
     }
-    callback(null);
+    callback(null, null, encryptContent);
 }
 /**
  * 使用readline进行交互，用户在控制台中输入验证码，后面可以改成直接在浏览器上交互
@@ -116,11 +140,13 @@ function inputPinCode(callback) {
         input: process.stdin,
         output: process.stdout
     });
-
-    rl.question('请输入验证码： \n', function (input) {
+    // let inputCode;
+    rl.question('请输入验证码： \n', function(input) {
         console.log('你输入的验证码为：' + input);
         rl.close();
-        return callback(null,input);
+        // inputCode = input;
+        // return callback(null, input);
+        return input;
     });
 }
 /**
@@ -128,20 +154,20 @@ function inputPinCode(callback) {
  * @param  {Function} callback [description]
  * @return {[type]}            [description]
  */
-function solveVertifyCode(callback) {
-    console.log(encrypt.content.showpin);
-    if (loginStatus || encrypt.content.showpin == 1) {
+function solveVertifyCode(entryContent, callback) {
+    console.log(entryContent.showpin);
+    if (loginStatus || entryContent.showpin == 1) {
         async.waterfall([
             getPinImage,
             inputPinCode
-        ],callback);
+        ], callback);
     } else {
         console.log('一切顺利，无需验证码！！！');
-        callback(null,null);
+        callback(null, null);
     }
 }
 
-function encodePassword(keyt,passwd) {
+function encodePassword(keyt, passwd) {
     let pwd = keyt.servertime + '\t' + keyt.nonce + '\n' + passwd;
     let RSAKey = new SinaRSA.RSAKey();
     RSAKey.setPublic(keyt.pubkey, '10001');
@@ -154,103 +180,98 @@ function encodePassword(keyt,passwd) {
  * @param  {Function} callback [description]
  * @return {[type]}            [description]
  */
-function login(code,callback) {
-    let encodedPwd = encodePassword(encrypt.content,accountInfo.password);
+function login(code, encryptContent, callback) {
+    console.log('4');
+    let encodedPwd = encodePassword(encryptContent, accountInfo.password);
     let postUrl = 'http://login.sina.com.cn/sso/login.php?client=ssologin.js(v1.4.11)';
     let params = {
-            entry: 'weibo',
-            gateway: '1',
-            savestate: '7',
-            from: '',
-            useticket: '1',
-            pagerefer: 'http://weibo.com/a/download',
-            vsnf: '1',
-            su: sinaSSOEncoder.base64.encode(accountInfo.username),
-            service: 'miniblog',
-            servertime: encrypt.content.servertime,
-            nonce: encrypt.content.nonce,
-            pwencode: 'rsa2',
-            rsakv: encrypt.content.rsakv,
-            sp: encodedPwd,
-            encoding: 'UTF-8',
-            url: 'http://weibo.com/ajaxlogin.php?framelogin=1&callback=parent.sinaSSOController.feedBackUrlCallBack',
-            eturntype: 'META',
-            ssosimplelogin: '1'
-        };
+        entry: 'weibo',
+        gateway: '1',
+        savestate: '7',
+        from: '',
+        useticket: '1',
+        pagerefer: 'http://weibo.com/a/download',
+        vsnf: '1',
+        su: sinaSSOEncoder.base64.encode(accountInfo.username),
+        service: 'miniblog',
+        servertime: encryptContent.servertime,
+        nonce: encryptContent.nonce,
+        pwencode: 'rsa2',
+        rsakv: encryptContent.rsakv,
+        sp: encodedPwd,
+        encoding: 'UTF-8',
+        url: 'http://weibo.com/ajaxlogin.php?framelogin=1&callback=parent.sinaSSOController.feedBackUrlCallBack',
+        eturntype: 'META',
+        ssosimplelogin: '1'
+    };
 
-        if (loginStatus || encrypt.content.showpin == 1) {
-            params.door = code;
-            params.pcid = encrypt.content.pcid;
-        }
+    if (loginStatus || encryptContent.showpin == 1) {
+        params.door = code;
+        params.pcid = encryptContent.pcid;
+    }
 
-        request.post({url:postUrl,form:params},(err,respones,body) => {
-            loginInfo.content = body;
-            // console.log(body);
-            callback(err);
-        });
+    request.post({ url: postUrl, form: params }, (err, respones, body) => {
+        // loginInfo.content = body;
+        callback(err, body);
+    });
 }
 /**
  * 当登录后根据结果跳转到指定接口获取cookie信息
  * @param  {Function} callback [description]
  * @return {[type]}            [description]
  */
-function loginJump (callback) {
+function loginJump(loginInfoContent,callback) {
+    console.log('5');
     //注意其中的捕获组，那就是我们要的上面登录返回的结果
     let reg = /location.replace\(["'](.*)["']\)/;
-    let jumpUrl = reg.exec(loginInfo.content)[1];
+    let jumpUrl = reg.exec(loginInfoContent)[1];
     let obj = querystring.parse(jumpUrl);
     if (obj.retcode == 0) {
-        let jar = request.jar(new FileCookieStore('cookies.json'));
-        request.defaults({jar:jar}).get(jumpUrl,function () {
-            // var cookies = jar.getCookies(jumpUrl);
-            cookieSave(accountInfo.cookiefile);
-            callback(null);
+        let jar = request.jar();
+        request({url: jumpUrl, jar: jar }, function(err) {
+            var cookies = jar.getCookies(jumpUrl);
+            callback(err, cookies);
         });
     } else if (obj.retcode == 4049) { //需要填入验证码
-        loginStatus = 1;//难道不用输入验证码了吗
-        // console.log("错误原因：" + obj.reason);
-        return main();
+        loginStatus = 1; //难道不用输入验证码了吗
+        // main();
+        callback(new Error('需要输入验证码'));
     }
-    callbackFn(obj);
+    // callbackFn(obj);
+    // callback(null);
 }
 
-function cookieSave(cookiefile) {
-    if (fs.existsSync('./cookies.json')) {
-        fs.readFile('./cookies.json',(err,data) => {
-            if (err) throw err;
-            let cookieArray = [];
-            let cookies = JSON.parse(data);
-            cookies = cookies['weibo.com']['/'];
-            for (let prop in cookies) {
-                let cookie = cookies[prop];
-                cookieArray.push([cookie.key,cookie.value].join('='));
-            }
-            fs.writeFileSync(cookiefile,cookieArray.join(';'));
-        });
-    }
+function cookieSave(cookies, callback) {
+    let cookieArr = cookies.map(function (cookie) {
+        return [cookie.key, cookie.value].join('='); 
+    });
+    fs.writeFileSync(accountInfo.cookiefile, cookieArr.join(';'));
+    callback(null);
 }
 
 function testCookie(cookies) {
+    console.log('6');
     let options = {
-        url:'http://weibo.com/messages',
-        headers:{
-            cookies:cookies
+        url: 'http://weibo.com/messages',
+        headers: {
+            Cookie: cookies
         }
     };
-    let callback = function (err,response,body) {
+    let callback = function(err, response, body) {
         if (err) {
             return callbackFn(err);
         }
-        if (response.statusCode == 302) {
-            console.log('Cookie Invalid!');
-            return callbackFn(err);
+        let $ = cheerio.load(body);
+        let title = $('title').text();
+        if (title == 'Sina Visitor System') {
+            return callbackFn(new Error('Cookie Invalid!'));
         } else {
             console.log('Cookie Wonderful!')
-            accountInfo.logined = true;
-            callbackFn(null,accountInfo);
+            console.log(title);
+            callbackFn(null);
         }
     }
-    request(options,callback);
+    request(options, callback);
 }
 
 module.exports = SinaLogin;

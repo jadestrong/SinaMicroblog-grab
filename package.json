@@ -23,7 +23,11 @@
   "homepage": "https://github.com/jadestrong/SinaMicroblog-grab#readme",
   "dependencies": {
     "async": "^2.0.0-rc.6",
+    "cheerio": "^0.20.0",
     "request": "^2.73.0",
     "tough-cookie-filestore": "0.0.1"
+  },
+  "devDependencies": {
+    "superagent": "^2.2.0"
   }
 }
